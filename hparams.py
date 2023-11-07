@@ -1,4 +1,3 @@
-from glob import glob
 import os
 
 def get_image_list(data_root, split):
@@ -73,7 +72,7 @@ hparams = HParams(
 	fmax=7600,  # To be increased/reduced depending on data.
 
 	###################### Our training parameters #################################
-	img_size=96,
+	img_size=288,
 	fps=25,
 	
 	batch_size=16,
