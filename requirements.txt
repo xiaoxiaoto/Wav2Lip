@@ -4,5 +4,6 @@ opencv-contrib-python
 opencv-python
 torch
 torchvision
+torchaudio
 tqdm
 numba
