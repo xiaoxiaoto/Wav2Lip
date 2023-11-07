@@ -1,7 +1,9 @@
 from torch.utils.model_zoo import load_url
+import os
 
 from .detect import *
 from ..core import FaceDetector
+from .net_s3fd import s3fd
 
 models_urls = {
     's3fd': 'https://www.adrianbulat.com/downloads/python-fan/s3fd-619a316812.pth',
