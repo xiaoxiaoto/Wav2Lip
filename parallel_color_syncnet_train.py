@@ -7,6 +7,8 @@ from os.path import dirname, join, basename, isfile
 
 import numpy as np
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import nn
 from torch import optim
 from torch.utils import data as data_utils
@@ -19,9 +21,9 @@ from models import SyncNet_color as SyncNet
 parser = argparse.ArgumentParser(description='Code to train the expert lip-sync discriminator')
 
 parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True)
-
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
 parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default=None, type=str)
+parser.add_augement('--local_rank', default=-1)
 
 args = parser.parse_args()
 
@@ -169,13 +171,13 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             cur_session_steps = global_step - resumed_step
             running_loss += loss.item()
 
-            if global_step == 1 or global_step % checkpoint_interval == 0:
+            if (global_step == 1 or global_step % checkpoint_interval == 0) and dist.get_rank() == 0:
                 checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step,
                                                                                                   running_loss / (
                                                                                                               step + 1)))
                 save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
 
-            if global_step % hparams.syncnet_eval_interval == 0:
+            if global_step % hparams.syncnet_eval_interval == 0 and dist.get_rank() == 0:
                 with torch.no_grad():
                     eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
                     if eval_loss < global_loss:
@@ -231,8 +233,7 @@ def _load(checkpoint_path):
     if use_cuda:
         checkpoint = torch.load(checkpoint_path)
     else:
-        checkpoint = torch.load(checkpoint_path,
-                                map_location=lambda storage, loc: storage)
+        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
     return checkpoint
 
 
@@ -260,29 +261,42 @@ if __name__ == "__main__":
 
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
+    if not use_cuda:
+        torch.cuda.set_device(args.local_rank)
+        dist.init_process_group(backend='nccl')
+
     # Dataset and Dataloader setup
     train_dataset = Dataset('train')
     test_dataset = Dataset('val')
 
-    train_data_loader = data_utils.DataLoader(
-        train_dataset, batch_size=hparams.syncnet_batch_size, shuffle=True,
-        num_workers=hparams.num_workers)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)
 
-    test_data_loader = data_utils.DataLoader(
-        test_dataset, batch_size=hparams.syncnet_batch_size,
-        num_workers=8)
+    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, hparams.syncnet_batch_size, drop_last=True)
 
-    device = torch.device("cuda" if use_cuda else "cpu")
+    train_data_loader = torch.utils.data.DataLoader(train_dataset,
+                                                    batch_sampler=train_batch_sampler,
+                                                    pin_memory=True,
+                                                    num_workers=hparams.num_workers)
+
+    test_data_loader = torch.utils.data.DataLoader(test_dataset,
+                                                   batch_size=hparams.syncnet_batch_size,
+                                                   sampler=test_sampler,
+                                                   pin_memory=True,
+                                                   num_workers=max(8, int(hparams.num_workers / 2)))
+
+    device = torch.device("cuda", args.local_rank) if use_cuda else torch.device("cpu")
 
     # Model
-    model = nn.DataParallel(SyncNet()).to(device)
+    model = SyncNet().to(device)
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
 
-    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
-                           lr=hparams.syncnet_lr)
+    optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=hparams.syncnet_lr)
 
-    if checkpoint_path is not None:
+    if checkpoint_path is not None and dist.get_rank() == 0:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=False)
+
+    model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
 
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,

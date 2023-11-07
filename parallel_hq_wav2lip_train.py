@@ -438,8 +438,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # Model
-    model = nn.DataParallel(Wav2Lip()).to(device)
-    disc = nn.DataParallel(Wav2Lip_disc_qual()).to(device)
+    model = Wav2Lip().to(device)
+    disc = Wav2Lip_disc_qual().to(device)
 
     print('total trainable params {}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
     print('total DISC trainable params {}'.format(sum(p.numel() for p in disc.parameters() if p.requires_grad)))
