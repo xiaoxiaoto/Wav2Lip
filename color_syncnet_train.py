@@ -25,7 +25,6 @@ parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', de
 
 args = parser.parse_args()
 
-
 global_step = 0
 global_epoch = 0
 global_loss = 1
@@ -34,6 +33,7 @@ print('use_cuda: {}'.format(use_cuda))
 
 syncnet_T = 5
 syncnet_mel_step_size = 16
+
 
 class Dataset(object):
     def __init__(self, split):
@@ -61,8 +61,7 @@ class Dataset(object):
 
         end_idx = start_idx + syncnet_mel_step_size
 
-        return spec[start_idx : end_idx, :]
-
+        return spec[start_idx: end_idx, :]
 
     def __len__(self):
         return len(self.all_videos)
@@ -124,26 +123,29 @@ class Dataset(object):
             # H x W x 3 * T
             x = np.concatenate(window, axis=2) / 255.
             x = x.transpose(2, 0, 1)
-            x = x[:, x.shape[1]//2:]
+            x = x[:, x.shape[1] // 2:]
 
             x = torch.FloatTensor(x)
             mel = torch.FloatTensor(mel.T).unsqueeze(0)
 
             return x, mel, y
 
+
 logloss = nn.BCELoss()
+
+
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
     loss = logloss(d.unsqueeze(1), y)
 
     return loss
 
+
 def train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None):
-
     global global_step, global_epoch
     resumed_step = global_step
-    
+
     while global_epoch < nepochs:
         running_loss = 0.
         prog_bar = tqdm(enumerate(train_data_loader))
@@ -168,20 +170,21 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             running_loss += loss.item()
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
-                checkpoint_path = join(checkpoint_dir, "checkpoint_step{:09d}.pth".format(global_step))
+                checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}.pth".format(global_step))
                 save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
 
             if global_step % hparams.syncnet_eval_interval == 0:
                 with torch.no_grad():
                     eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
                     if eval_loss < global_loss:
-                        checkpoint_path = join(checkpoint_dir, "bast_checkpoint_step{:09d}.pth".format(global_step))
+                        checkpoint_path = join(checkpoint_dir, "bast_syncnet_step{:09d}.pth".format(global_step))
                         save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
                         global_loss = eval_loss
 
             prog_bar.set_description('Loss: {}'.format(running_loss / (step + 1)))
 
         global_epoch += 1
+
 
 def eval_model(test_data_loader, global_step, device, model, checkpoint_dir):
     eval_steps = 1400
@@ -209,6 +212,7 @@ def eval_model(test_data_loader, global_step, device, model, checkpoint_dir):
         print(averaged_loss)
         return averaged_loss
 
+
 def save_checkpoint(model, optimizer, step, checkpoint_path, epoch):
     optimizer_state = optimizer.state_dict() if hparams.save_optimizer_state else None
     torch.save({
@@ -219,6 +223,7 @@ def save_checkpoint(model, optimizer, step, checkpoint_path, epoch):
     }, checkpoint_path)
     print("Saved checkpoint:", checkpoint_path)
 
+
 def _load(checkpoint_path):
     if use_cuda:
         checkpoint = torch.load(checkpoint_path)
@@ -226,6 +231,7 @@ def _load(checkpoint_path):
         checkpoint = torch.load(checkpoint_path,
                                 map_location=lambda storage, loc: storage)
     return checkpoint
+
 
 def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     global global_step
@@ -243,6 +249,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     global_epoch = checkpoint["global_epoch"]
 
     return model
+
 
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
