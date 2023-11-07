@@ -170,14 +170,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             running_loss += loss.item()
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
-                checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}.pth".format(global_step))
+                checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, running_loss / (step + 1)))
                 save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
 
             if global_step % hparams.syncnet_eval_interval == 0:
                 with torch.no_grad():
                     eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
                     if eval_loss < global_loss:
-                        checkpoint_path = join(checkpoint_dir, "bast_syncnet_step{:09d}.pth".format(global_step))
+                        checkpoint_path = join(checkpoint_dir, "bast_syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, eval_loss))
                         save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
                         global_loss = eval_loss
 

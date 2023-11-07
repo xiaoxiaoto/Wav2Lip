@@ -287,9 +287,9 @@ def train(device, model, disc, train_data_loader, test_data_loader, optimizer, d
                 running_perceptual_loss += 0.
 
             if global_step == 1 or global_step % checkpoint_interval == 0:
-                checkpoint_path = join(checkpoint_dir, "wav2lip_step{:09d}.pth".format(global_step))
+                checkpoint_path = join(checkpoint_dir, "wav2lip_step{:09d}_loss{:.4f}.pth".format(global_step, running_perceptual_loss / (step + 1)))
                 save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
-                checkpoint_path = join(checkpoint_dir, "disc_wav2lip_step{:09d}.pth".format(global_step))
+                checkpoint_path = join(checkpoint_dir, "disc_wav2lip_step{:09d}_loss{:.4f}.pth".format(global_step, running_perceptual_loss / (step + 1)))
                 save_checkpoint(disc, disc_optimizer, global_step, checkpoint_path, global_epoch)
 
             if global_step % hparams.eval_interval == 0:
@@ -299,7 +299,7 @@ def train(device, model, disc, train_data_loader, test_data_loader, optimizer, d
                     if average_sync_loss < .75:
                         hparams.set_hparam('syncnet_wt', 0.03)
                     if average_sync_loss < global_loss:
-                        checkpoint_path = join(checkpoint_dir, "bast_wav2lip_step{:09d}.pth".format(global_step))
+                        checkpoint_path = join(checkpoint_dir, "bast_wav2lip_step{:09d}_loss{:.4f}.pth".format(global_step, average_sync_loss))
                         save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
                         global_loss = average_sync_loss
 
