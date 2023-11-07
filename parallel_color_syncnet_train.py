@@ -23,7 +23,6 @@ parser = argparse.ArgumentParser(description='Code to train the expert lip-sync 
 parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True)
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
 parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default=None, type=str)
-parser.add_augement('--local_rank', default=-1)
 
 args = parser.parse_args()
 
@@ -174,7 +173,7 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             if (global_step == 1 or global_step % checkpoint_interval == 0) and dist.get_rank() == 0:
                 checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step,
                                                                                                   running_loss / (
-                                                                                                              step + 1)))
+                                                                                                          step + 1)))
                 save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
 
             if global_step % hparams.syncnet_eval_interval == 0 and dist.get_rank() == 0:
@@ -258,12 +257,13 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     checkpoint_path = args.checkpoint_path
+    local_rank = int(os.environ["LOCAL_RANK"])
 
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     if not use_cuda:
-        torch.cuda.set_device(args.local_rank)
-        dist.init_process_group(backend='nccl')
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend='nccl', init_method='env://')
 
     # Dataset and Dataloader setup
     train_dataset = Dataset('train')
@@ -285,7 +285,7 @@ if __name__ == "__main__":
                                                    pin_memory=True,
                                                    num_workers=max(8, int(hparams.num_workers / 2)))
 
-    device = torch.device("cuda", args.local_rank) if use_cuda else torch.device("cpu")
+    device = torch.device("cuda", local_rank) if use_cuda else torch.device("cpu")
 
     # Model
     model = SyncNet().to(device)
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     if checkpoint_path is not None and dist.get_rank() == 0:
         load_checkpoint(checkpoint_path, model, optimizer, reset_optimizer=False)
 
-    model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     train(device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=checkpoint_dir,
