@@ -1,16 +1,16 @@
 import argparse
-import cv2
 import os
 import random
 from glob import glob
 from os.path import dirname, join, basename, isfile
 
+import cv2
 import numpy as np
 import torch
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import nn
 from torch import optim
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils import data as data_utils
 from tqdm import tqdm
 
@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(description='Code to train the expert lip-sync 
 parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True)
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
 parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default=None, type=str)
-parser.add_argument("--local_rank", default=-1)
+parser.add_argument('--local_rank', default=-1)
 
 args = parser.parse_args()
 
@@ -171,19 +171,21 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             cur_session_steps = global_step - resumed_step
             running_loss += loss.item()
 
-            if (global_step == 1 or global_step % checkpoint_interval == 0) and dist.get_rank() == 0:
-                checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, running_loss / ( step + 1)))
-                save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
+            if dist.get_rank() == 0:
+                if global_step == 1 or global_step % checkpoint_interval == 0:
+                    checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step,  running_loss / (step + 1)))
+                    save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
 
-            if global_step % hparams.syncnet_eval_interval == 0 and dist.get_rank() == 0:
-                with torch.no_grad():
-                    eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
-                    if eval_loss < global_loss:
-                        checkpoint_path = join(checkpoint_dir, "bast_syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, eval_loss))
-                        save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
-                        global_loss = eval_loss
+                if global_step % hparams.syncnet_eval_interval == 0:
+                    with torch.no_grad():
+                        eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
+                        if eval_loss < global_loss:
+                            checkpoint_path = join(checkpoint_dir,
+                                                   "bast_syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, eval_loss))
+                            save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
+                            global_loss = eval_loss
 
-            prog_bar.set_description('Loss: {}'.format(running_loss / (step + 1)))
+                prog_bar.set_description('Loss: {}'.format(running_loss / (step + 1)))
 
         global_epoch += 1
 
