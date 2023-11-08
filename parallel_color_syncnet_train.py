@@ -133,6 +133,29 @@ class Dataset(object):
             return x, mel, y
 
 
+def load_dataset():
+    # Dataset and Dataloader setup
+    train_dataset = Dataset('train')
+    test_dataset = Dataset('val')
+
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=True)
+    test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)
+
+    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, hparams.syncnet_batch_size, drop_last=True)
+
+    train_data_loader = torch.utils.data.DataLoader(train_dataset,
+                                                    batch_sampler=train_batch_sampler,
+                                                    pin_memory=True,
+                                                    num_workers=hparams.num_workers)
+
+    test_data_loader = torch.utils.data.DataLoader(test_dataset,
+                                                   batch_size=hparams.syncnet_batch_size,
+                                                   sampler=test_sampler,
+                                                   pin_memory=True,
+                                                   num_workers=max(8, int(hparams.num_workers / 2)))
+    return train_data_loader, test_data_loader
+
+
 logloss = nn.BCELoss()
 
 
@@ -173,7 +196,9 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
 
             if dist.get_rank() == 0:
                 if global_step == 1 or global_step % checkpoint_interval == 0:
-                    checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step,  running_loss / (step + 1)))
+                    checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step,
+                                                                                                      running_loss / (
+                                                                                                              step + 1)))
                     save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
 
                 if global_step % hparams.syncnet_eval_interval == 0:
@@ -181,7 +206,8 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
                         eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
                         if eval_loss < global_loss:
                             checkpoint_path = join(checkpoint_dir,
-                                                   "bast_syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, eval_loss))
+                                                   "bast_syncnet_step{:09d}_loss{:.4f}.pth".format(global_step,
+                                                                                                   eval_loss))
                             save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
                             global_loss = eval_loss
 
@@ -228,20 +254,15 @@ def save_checkpoint(model, optimizer, step, checkpoint_path, epoch):
     print("Saved checkpoint:", checkpoint_path)
 
 
-def _load(checkpoint_path):
-    if use_cuda:
-        checkpoint = torch.load(checkpoint_path)
-    else:
-        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
-    return checkpoint
-
-
 def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     global global_step
     global global_epoch
 
     print("Load checkpoint from: {}".format(path))
-    checkpoint = _load(path)
+    if torch.cuda.is_available():
+        checkpoint = torch.load(checkpoint_path)
+    else:
+        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
     model.load_state_dict(checkpoint["state_dict"])
     if not reset_optimizer:
         optimizer_state = checkpoint["optimizer"]
@@ -259,32 +280,14 @@ if __name__ == "__main__":
     checkpoint_path = args.checkpoint_path
     local_rank = args.local_rank
 
+    train_data_loader, test_data_loader = load_dataset()
+
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     if use_cuda:
         torch.cuda.set_device(local_rank)
         dist.init_process_group(backend='nccl', init_method='env://')
         dist.barrier()
-
-    # Dataset and Dataloader setup
-    train_dataset = Dataset('train')
-    test_dataset = Dataset('val')
-
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=True)
-    test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)
-
-    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, hparams.syncnet_batch_size, drop_last=True)
-
-    train_data_loader = torch.utils.data.DataLoader(train_dataset,
-                                                    batch_sampler=train_batch_sampler,
-                                                    pin_memory=True,
-                                                    num_workers=hparams.num_workers)
-
-    test_data_loader = torch.utils.data.DataLoader(test_dataset,
-                                                   batch_size=hparams.syncnet_batch_size,
-                                                   sampler=test_sampler,
-                                                   pin_memory=True,
-                                                   num_workers=max(8, int(hparams.num_workers / 2)))
 
     device = torch.device("cuda") if use_cuda else torch.device("cpu")
 
