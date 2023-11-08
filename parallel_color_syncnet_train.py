@@ -23,6 +23,7 @@ parser = argparse.ArgumentParser(description='Code to train the expert lip-sync 
 parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True)
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
 parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default=None, type=str)
+parser.add_argument("--local_rank", default=-1)
 
 args = parser.parse_args()
 
@@ -171,17 +172,14 @@ def train(device, model, train_data_loader, test_data_loader, optimizer,
             running_loss += loss.item()
 
             if (global_step == 1 or global_step % checkpoint_interval == 0) and dist.get_rank() == 0:
-                checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step,
-                                                                                                  running_loss / (
-                                                                                                          step + 1)))
+                checkpoint_path = join(checkpoint_dir, "syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, running_loss / ( step + 1)))
                 save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
 
             if global_step % hparams.syncnet_eval_interval == 0 and dist.get_rank() == 0:
                 with torch.no_grad():
                     eval_loss = eval_model(test_data_loader, global_step, device, model, checkpoint_dir)
                     if eval_loss < global_loss:
-                        checkpoint_path = join(checkpoint_dir,
-                                               "bast_syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, eval_loss))
+                        checkpoint_path = join(checkpoint_dir, "bast_syncnet_step{:09d}_loss{:.4f}.pth".format(global_step, eval_loss))
                         save_checkpoint(model, optimizer, global_step, checkpoint_path, global_epoch)
                         global_loss = eval_loss
 
@@ -257,13 +255,14 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     checkpoint_path = args.checkpoint_path
-    local_rank = int(os.environ["LOCAL_RANK"])
+    local_rank = args.local_rank
 
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
     if not use_cuda:
         torch.cuda.set_device(local_rank)
         dist.init_process_group(backend='nccl', init_method='env://')
+        dist.barrier()
 
     # Dataset and Dataloader setup
     train_dataset = Dataset('train')
@@ -272,7 +271,7 @@ if __name__ == "__main__":
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)
 
-    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, hparams.syncnet_batch_size, drop_last=True)
+    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, hparams.syncnet_batch_size, shuffle=True)
 
     train_data_loader = torch.utils.data.DataLoader(train_dataset,
                                                     batch_sampler=train_batch_sampler,
