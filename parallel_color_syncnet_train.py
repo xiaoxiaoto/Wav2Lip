@@ -270,10 +270,10 @@ if __name__ == "__main__":
     train_dataset = Dataset('train')
     test_dataset = Dataset('val')
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=True)
     test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)
 
-    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, hparams.syncnet_batch_size, shuffle=True)
+    train_batch_sampler = torch.utils.data.BatchSampler(train_sampler, hparams.syncnet_batch_size, drop_last=True)
 
     train_data_loader = torch.utils.data.DataLoader(train_dataset,
                                                     batch_sampler=train_batch_sampler,
@@ -286,7 +286,7 @@ if __name__ == "__main__":
                                                    pin_memory=True,
                                                    num_workers=max(8, int(hparams.num_workers / 2)))
 
-    device = torch.device("cuda", local_rank) if use_cuda else torch.device("cpu")
+    device = torch.device("cuda") if use_cuda else torch.device("cpu")
 
     # Model
     model = SyncNet().to(device)
