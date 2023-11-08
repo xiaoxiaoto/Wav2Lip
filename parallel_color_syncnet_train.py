@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
 
-    if not use_cuda:
+    if use_cuda:
         torch.cuda.set_device(local_rank)
         dist.init_process_group(backend='nccl', init_method='env://')
         dist.barrier()
