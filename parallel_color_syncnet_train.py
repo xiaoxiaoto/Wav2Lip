@@ -168,7 +168,7 @@ def cosine_loss(a, v, y):
 
 def train(rank, world_size, device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None):
-    global global_step, global_epoch
+    global global_step, global_epoch, global_loss
     resumed_step = global_step
 
     while global_epoch < nepochs:
