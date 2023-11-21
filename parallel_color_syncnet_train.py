@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(description='Code to train the expert lip-sync 
 parser.add_argument("--data_root", help="Root folder of the preprocessed LRS2 dataset", required=True)
 parser.add_argument('--checkpoint_dir', help='Save checkpoints to this directory', required=True, type=str)
 parser.add_argument('--checkpoint_path', help='Resumed from this checkpoint', default=None, type=str)
-parser.add_argument('--local_rank', default=-1)
+parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
 
 args = parser.parse_args()
 
@@ -166,7 +166,7 @@ def cosine_loss(a, v, y):
     return loss
 
 
-def train(device, model, train_data_loader, test_data_loader, optimizer,
+def train(rank, world_size, device, model, train_data_loader, test_data_loader, optimizer,
           checkpoint_dir=None, checkpoint_interval=None, nepochs=None):
     global global_step, global_epoch
     resumed_step = global_step
@@ -260,7 +260,7 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
 
     print("Load checkpoint from: {}".format(path))
     if torch.cuda.is_available():
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
     else:
         checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
     model.load_state_dict(checkpoint["state_dict"])
@@ -275,19 +275,29 @@ def load_checkpoint(path, model, optimizer, reset_optimizer=False):
     return model
 
 
+def setup(rank, world_size):
+    # 初始化进程组
+    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
+    # 设置随机种子和设备
+    torch.manual_seed(0)
+    torch.cuda.set_device(rank)
+
+
+def cleanup():
+    dist.destroy_process_group()
+
+
 if __name__ == "__main__":
     checkpoint_dir = args.checkpoint_dir
     checkpoint_path = args.checkpoint_path
     local_rank = args.local_rank
+    world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
+
+    setup(local_rank, world_size)
 
     train_data_loader, test_data_loader = load_dataset()
 
     if not os.path.exists(checkpoint_dir): os.mkdir(checkpoint_dir)
-
-    if use_cuda:
-        torch.cuda.set_device(local_rank)
-        dist.init_process_group(backend='nccl', init_method='env://')
-        dist.barrier()
 
     device = torch.device("cuda") if use_cuda else torch.device("cpu")
 
